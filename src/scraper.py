@@ -5,7 +5,7 @@ from hashlib import shake_256
 from queue import Queue
 from threading import Lock, Thread
 
-import requests
+from curl_cffi import requests
 from dotenv import dotenv_values
 from rich.progress import Progress
 from sqlalchemy import create_engine
@@ -73,11 +73,17 @@ def process_course(course, year, subject, engine, progress, subject_task, lock):
             progress.update(subject_task, advance=1)
             return
         course_details = data_parser.get_course_details(course_code)
+        if not course_details:
+            logger.error(
+                f"Failed to fetch course details for {course_code}. Skipping course."
+            )
+            progress.update(subject_task, advance=1)
+            return
 
         name = subject["subject"]
         title = course_details.get("title", "")
         terms = course.get("terms")
-        campus = course_details["campus"]
+        campus = course_details.get("campus")
 
         # Course Custom ID
         course_cid = get_short_hash(f"{name}{course_code}{title}{year}{terms}{campus}")
@@ -143,9 +149,14 @@ def process_course(course, year, subject, engine, progress, subject_task, lock):
 
                     try:
                         headers = {
-                            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
                         }
-                        resp = requests.get(outline_url, headers=headers, timeout=5)
+                        resp = requests.get(
+                            outline_url,
+                            headers=headers,
+                            timeout=5,
+                            impersonate="chrome146",
+                        )
 
                         if resp.status_code == 200:
                             text = resp.text.lower()
@@ -224,8 +235,9 @@ def process_course(course, year, subject, engine, progress, subject_task, lock):
                 class_type = individual_class.get("component")
                 class_nbr = individual_class.get("class_number")
                 section = individual_class.get("section")
+                group_name = individual_class.get("group")
                 class_cid = get_short_hash(
-                    f"{course_cid}{class_type}{class_nbr}{section}"
+                    f"{course_cid}{class_type}{class_nbr}{section}{group_name or ''}"
                 )
                 try:
                     db_course_class = CourseClass(
@@ -235,6 +247,7 @@ def process_course(course, year, subject, engine, progress, subject_task, lock):
                         size=int(individual_class.get("size", 0)),
                         available=int(individual_class.get("available", 0)),
                         component=class_type,
+                        group=group_name,
                         course_id=course_cid,
                     )
                     write_queue.put(db_course_class)
