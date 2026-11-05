@@ -23,9 +23,9 @@ def fetch_proxies(url):
 
 def test_proxy(
     proxy,
-    test_url="https://adelaideuni.edu.au/study/courses/",
-    timeout=5,
-    retries=2,  # Number of retries
+    test_url="https://adelaide.edu.au/study/courses/",
+    timeout=3,
+    retries=1,  # Number of retries
 ):
     """Test if the given proxy is working by making a request."""
     proxies = {
@@ -36,7 +36,7 @@ def test_proxy(
         try:
             # Use realistic User-Agent to avoid WAF block
             headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
             }
             response = requests.get(
                 test_url, proxies=proxies, headers=headers, timeout=timeout
@@ -61,9 +61,20 @@ def save_working_proxies(proxies, filename="src/working_proxies.txt"):
             file.write(f"{proxy}\n")
 
 
-def main():
-    proxy_url = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/http.txt"
-    proxies = fetch_proxies(proxy_url)
+def main(target_working: int = 500):
+    proxy_urls = [
+        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/http.txt",
+        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+        "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
+    ]
+    proxies = []
+    for url in proxy_urls:
+        try:
+            proxies.extend(fetch_proxies(url))
+        except Exception:
+            pass
+    # Deduplicate proxies while preserving order
+    proxies = list(dict.fromkeys(proxies))
 
     working_proxies = []
 
@@ -76,7 +87,7 @@ def main():
         task = progress.add_task("Testing Proxies...", total=len(proxies))
 
         # Use ThreadPoolExecutor for concurrency
-        with ThreadPoolExecutor(max_workers=1000) as executor:
+        with ThreadPoolExecutor(max_workers=100) as executor:
             future_to_proxy = {
                 executor.submit(test_proxy, proxy): proxy for proxy in proxies
             }
@@ -86,6 +97,10 @@ def main():
                     result = future.result()
                     if result:
                         working_proxies.append(result)
+                        if len(working_proxies) >= target_working:
+                            for f in future_to_proxy:
+                                f.cancel()
+                            break
                 except Exception:
                     pass  # Handle or log specific proxy testing errors if needed
 
